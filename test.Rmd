@@ -1,0 +1,273 @@
+---
+title: "Clustering"
+output: html_document
+---
+
+```{r}
+
+library(cluster)
+library(factoextra)
+library(dbscan)
+library(ggrepel)
+library(ggpubr)
+library(dplyr)
+library(pander)
+```
+
+First, we need to open our file where we have the cleaned merged data set.
+
+```{r}
+
+link='https://github.com/sanjp0594/PUBPOL542-Data/raw/master/TEAMdata.RDS'
+
+myfile=url(link)
+
+fromPy=readRDS(file = myfile)
+
+row.names(fromPy)=NULL
+
+```
+
+Now, with the shift from python to R, it looks like the outer merge has done something weird and we have a lot of extra columns we didn't mean to have.
+
+We will need to first drop these columns as they are not of relevance for us.
+
+```{r}
+
+fromPy<- fromPy %>% select(-c(40:222))
+
+```
+
+Now that we have done this, we can focus on clustering. It looks like we have some variables that are string variables
+
+```{r}
+#Exploring variables
+check<- fromPy %>% group_by(Kyoto_Protocol_x) %>%
+  summarize(num_Country= n_distinct(Country_x))
+
+check
+```
+
+```{r}
+
+#Subset the dataframes
+fromPy$Kyoto_Protocol_x <- as.ordered(fromPy$Kyoto_Protocol_x)
+dfClus<- fromPy[,c(6,37,40)]
+
+
+
+row.names(dfClus)=fromPy$Country_x
+
+head(dfClus)
+  
+set.seed(999)
+
+dfClus_D=cluster::daisy(x=dfClus,metric="gower")
+
+```
+
+Now moving to the partitioning technique-
+
+```{r}
+
+NumCluster=4
+res.pam = pam(x=dfClus_D,k = NumCluster,cluster.only = F)
+
+fromPy$pam=as.factor(res.pam$clustering)
+
+fromPy[fromPy$pam==1,'Country_x']
+
+table(fromPy$pam)
+
+```
+
+Now to evaluate results
+
+```{r}
+
+fviz_silhouette(res.pam)
+
+```
+
+But we need to check for anomalies-
+
+```{r}
+#First save individual silhouettes
+pamEval=data.frame(res.pam$silinfo$widths)
+head(pamEval)
+```
+
+```{r}
+
+#Request the negative silhouettes
+pamEval[pamEval$sil_width<0,]
+```
+
+Moving on to Agglomerative Heirarchizing
+
+```{r}
+
+res.agnes= hcut(dfClus_D, k = NumCluster,isdiss=T,
+                 hc_func='agnes',
+                 hc_method = "ward.D2")
+
+fromPy$agn=as.factor(res.agnes$cluster)
+
+table(fromPy$agn)
+```
+
+```{r}
+
+#First, the dendogram
+fviz_dend(res.agnes,k=NumCluster, cex = 0.22, horiz = F, type = c("rectangle"),  repel = TRUE)
+```
+
+```{r}
+
+#Find the average silhouettes
+fviz_silhouette(res.agnes)
+```
+
+```{r}
+
+#Now detect the anomalies
+#Save Silhouettes
+agnEval=data.frame(res.agnes$silinfo$widths)
+head(agnEval)
+```
+
+```{r}
+#Check negative Silhouettes
+agnEval[agnEval$sil_width<0,]
+```
+
+Moving to Divisive Heirarchizing
+
+```{r}
+
+#Indicate the number of cluster
+
+res.diana= hcut(dfClus_D, k = NumCluster,
+                 hc_func='diana',
+                 hc_method = "ward.D")
+```
+
+```{r}
+
+#Cluster
+
+fromPy$dia=as.factor(res.diana$cluster)
+table(fromPy$dia)
+```
+
+```{r}
+
+#Eval Results
+#Dendogram
+fviz_dend(res.diana,k=NumCluster, cex = 0.7, horiz = T)
+```
+
+```{r}
+#Average Silhouettes
+fviz_silhouette(res.diana)
+```
+
+```{r}
+#Save Silhouettes
+diaEval=data.frame(res.diana$silinfo$widths)
+head(diaEval)
+```
+
+```{r}
+#Check for negatives
+diaEval[diaEval$sil_width<0,]
+```
+
+Now, density based clustering
+
+```{r}
+
+#minNeighs> num cols in data
+minNeighs=4
+kNNdistplot(dfClus_D, k = minNeighs)
+abline(h=.03, col = "red", lty=2)
+```
+
+```{r}
+distance=0.03
+res.db = dbscan::dbscan(dfClus_D, eps=distance, 
+                     minPts=minNeighs)
+```
+
+Now to report
+
+```{r}
+#How many outliers exist (marking outliers are 0)
+
+res.db
+fromPy$db=as.factor(res.db$cluster)
+```
+
+```{r}
+#Prepare a bidimensional map:
+
+projectedData = cmdscale(dfClus_D, k=2)
+#
+# save coordinates to original data frame:
+fromPy$dim1 = projectedData[,1]
+fromPy$dim2 = projectedData[,2]
+```
+Now, we want to view the map
+
+```{r}
+base= ggplot(data=fromPy,
+             aes(x=dim1, y=dim2,
+                 label=Country_x)) 
+base + geom_text(size=2)
+```
+
+```{r}
+#Plot results from PAM:
+
+pamPlot=base + labs(title = "PAM") + geom_point(size=2,
+                                              aes(color=pam),
+                                              show.legend = F)
+
+#Plot results from Hierarchical AGNES:
+agnPlot=base + labs(title = "AGNES") + geom_point(size=2,
+                                              aes(color=agn),
+                                              show.legend = F) 
+#Plot results from Hierarchical DIANA:
+diaPlot=base + labs(title = "DIANA") + geom_point(size=2,
+                                              aes(color=dia),
+                                              show.legend = F) 
+```
+
+Now, plot them using ggplot
+
+```{r}
+
+ggarrange(pamPlot, agnPlot, diaPlot,ncol = 3)
+
+```
+
+```{r}
+#Plot results from DBSCAN:
+
+dbPlot= base + labs(title = "DBSCAN") + geom_point(aes(color=db),
+                                               show.legend = T) 
+dbPlot
+```
+
+```{r}
+#Annotating
+dbPlot + geom_text_repel(size=3,aes(label=Country_x))
+```
+
+```{r}
+#Annotating Outliers
+
+LABEL=ifelse(fromPy$db==0,fromPy$Country_x,"")
+
+dbPlot + geom_text_repel(aes(label=LABEL))+theme_bw(base_size = 18)
+```
