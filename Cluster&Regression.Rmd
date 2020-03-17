@@ -1,0 +1,287 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+
+
+library(cluster)
+library(factoextra)
+library(dbscan)
+library(ggrepel)
+library(ggpubr)
+library(dplyr)
+library(pander)
+
+
+#CLUSTER ANALYSIS
+
+#Subset the dataframes
+link='https://github.com/andresbas/DataScience/raw/master/FinalMerge.RDS'
+
+myfile=url(link)
+
+fromPy=readRDS(file = myfile)
+
+row.names(fromPy)=NULL
+
+fromPy <- fromPy[!fromPy$Country == "Liechtenstein", ]
+fromPy <- fromPy[!fromPy$Country == "Somalia", ]
+fromPy <- fromPy[!fromPy$Country == "Syrian Arab Republic", ]
+
+
+#Subset the dataframes
+
+dfClus<- fromPy[,c(3,4)]
+
+row.names(dfClus)=fromPy$Country
+
+head(dfClus)
+  
+set.seed(999)
+
+dfClus_D=cluster::daisy(x=dfClus,metric="gower")
+
+
+
+```
+
+Now, density based clustering
+
+```{r}
+
+#minNeighs> num cols in data
+minNeighs=10
+kNNdistplot(dfClus_D, k = minNeighs)
+abline(h=.03, col = "red", lty=2)
+```
+
+```{r}
+minNeighs=3
+distance=0.03
+
+res.db = dbscan::dbscan(dfClus_D, eps=distance, 
+                     minPts=minNeighs)
+res.db
+fromPy$db=as.factor(res.db$cluster)
+```
+
+Now to report
+
+
+```{r}
+#Prepare a bidimensional map:
+
+projectedData = cmdscale(dfClus_D, k=2)
+#
+# save coordinates to original data frame:
+fromPy$dim1 = projectedData[,1]
+fromPy$dim2 = projectedData[,2]
+```
+Now, we want to view the map
+
+```{r}
+base= ggplot(data=fromPy,
+             aes(x=dim1, y=dim2,
+                 label=Country)) 
+base + geom_text(size=2)
+```
+
+
+
+```{r}
+#Plot results from DBSCAN:
+
+dbPlot= base + labs(title = "DBSCAN") + geom_point(aes(color=db),
+                                               show.legend = T) 
+dbPlot
+```
+
+```{r}
+#Annotating
+dbPlot + geom_text_repel(size=3,aes(label=Country))
+```
+
+```{r}
+#Annotating Outliers
+
+LABEL=ifelse(fromPy$db==0,fromPy$Country,"")
+
+dbPlot + geom_text_repel(aes(label=LABEL))+theme_bw(base_size = 18)
+```
+
+```{r}
+
+a <- fromPy %>% group_by(db) %>% summarize(pop_mean_value = mean(Population), pop_sd_value = sd(Population), gdp_mean_value = mean(GDPperCapita), gdp_sd_value = sd(GDPperCapita)) %>% rename(Cluster=db, 'Mean Population'=pop_mean_value, 'SD Population'=pop_sd_value,'Mean GDP per Capita'=gdp_mean_value,'SD GDP per Capita'=gdp_sd_value) %>% pander(style="rmarkdown", caption="Cluster-wise Mean and SD")
+
+a
+
+```
+
+
+```{r}
+#REGRESSION
+
+link='https://github.com/sanjp0594/PUBPOL542-Data/raw/master/FinalFile.RDS'
+
+myFile=url(link)
+
+
+fromPy1=readRDS(file = myFile)
+fromPy2=fromPy[-c(38),] 
+fromPy3=fromPy[-c(10,13,16,23,38,48,74,87,104,106,110,137,138,139,140,144,162,174),]
+row.names(fromPy)=NULL
+
+# X2019Score is Index of Economic Freedom, the higher the better
+# bci_bci is The Bayesian Corruption Indicator, the higher the indicator the more corruption
+# cspf_sfi is the State Fragility Index (government effectiveness + legitimacy), the lower the better
+# cspf_sfi E-Government Development Index (EGDI) is a weighted average of normalised scores on the three most important dimensions of e-government, the higher the better
+```
+
+
+
+```{r}
+#dropping all columns
+# Stating hypothesis
+
+Hypo1=formula(fromPy3$Paris_OA~  + fromPy3$X2019Score)
+Hypo2=formula(fromPy3$Paris_OA~  + fromPy3$X2019Score + fromPy3$Population)
+Hypo3=formula(fromPy3$Paris_OA~  + fromPy3$X2019Score + fromPy3$Population + fromPy3$GDPperCapita)
+Hypo4=formula(fromPy3$Paris_OA~  + fromPy3$X2019Score + fromPy3$bci_bci + fromPy3$Population + fromPy3$GDPperCapita)
+Hypo5=formula(fromPy3$Paris_OA~  + fromPy3$X2019Score + fromPy3$bci_bci + fromPy3$egov_egov.y + fromPy3$Population + fromPy3$GDPperCapita)
+
+
+Hypo6=formula(fromPy3$Paris_OA~  + fromPy3$X2019Score + fromPy3$bci_bci+ fromPy3$cspf_sfi + fromPy3$egov_egov.y + fromPy3$Population + fromPy3$GDPperCapita)
+
+
+Logi1=glm(Hypo1,data = fromPy3,family = "binomial")
+Logi2=glm(Hypo2,data = fromPy3,family = "binomial")
+Logi3=glm(Hypo3,data = fromPy3,family = "binomial")
+Logi4=glm(Hypo4,data = fromPy3,family = "binomial")
+Logi5=glm(Hypo5,data = fromPy3,family = "binomial")
+Logi6=glm(Hypo6,data = fromPy3,family = "binomial")
+```
+
+```{r}
+#library(lmtest)
+anova(Logi1,Logi2, test="LRT")
+```
+```{r}
+anova(Logi2,Logi3, test="LRT")
+```
+
+```{r}
+
+anova(Logi3,Logi4, test="LRT")
+
+```
+
+```{r}
+#import
+anova(Logi4,Logi5, test="LRT")
+```
+
+```{r}
+anova(Logi5,Logi6, test="LRT")
+```
+```{r}
+anova(Logi4,Logi6, test="LRT")
+```
+
+```{r}
+#dropping congo only
+#Stating hypothesis
+Hypo7=formula(fromPy2$Paris_OA~  + fromPy2$X2019Score)
+Hypo8=formula(fromPy2$Paris_OA~  + fromPy2$X2019Score + fromPy2$Population)
+Hypo9=formula(fromPy2$Paris_OA~  + fromPy2$X2019Score + fromPy2$Population + fromPy2$GDPperCapita)
+Hypo10=formula(fromPy2$Paris_OA~  + fromPy2$X2019Score + fromPy2$bci_bci + fromPy2$Population + fromPy2$GDPperCapita)
+Hypo11=formula(fromPy2$Paris_OA~  + fromPy2$X2019Score + fromPy2$bci_bci + fromPy2$egov_egov.y + fromPy2$Population + fromPy2$GDPperCapita)
+
+
+Logi7=glm(Hypo7,data = fromPy2,family = "binomial")
+Logi8=glm(Hypo8,data = fromPy2,family = "binomial")
+Logi9=glm(Hypo9,data = fromPy2,family = "binomial")
+Logi10=glm(Hypo10,data = fromPy2,family = "binomial")
+Logi11=glm(Hypo11,data = fromPy2,family = "binomial")
+
+```
+
+```{r}
+#library(lmtest)
+anova(Logi7,Logi8, test="LRT")
+```
+
+```{r}
+anova(Logi8,Logi9, test="LRT")
+```
+
+```{r}
+
+anova(Logi9,Logi10, test="LRT")
+
+```
+
+```{r}
+anova(Logi10,Logi11, test="LRT")
+```
+
+
+```{r}
+Hypo12=formula(fromPy1$Paris_OA~  + fromPy1$X2019Score)
+Hypo13=formula(fromPy1$Paris_OA~  + fromPy1$X2019Score + fromPy1$Population)
+Hypo14=formula(fromPy1$Paris_OA~  + fromPy1$X2019Score + fromPy1$Population + fromPy1$GDPperCapita)
+Hypo15=formula(fromPy1$Paris_OA~  + fromPy1$X2019Score + fromPy1$bci_bci + fromPy1$Population + fromPy1$GDPperCapita)
+
+Logi12=glm(Hypo12,data = fromPy1,family = "binomial")
+Logi13=glm(Hypo13,data = fromPy1,family = "binomial")
+Logi14=glm(Hypo14,data = fromPy1,family = "binomial")
+Logi15=glm(Hypo15,data = fromPy1,family = "binomial")
+
+```
+```{r}
+#library(lmtest)
+anova(Logi4,Logi10, test="LRT")
+```
+
+```{r}
+#library(lmtest)
+anova(Logi13,Logi14, test="LRT")
+```
+
+```{r}
+#library(lmtest)
+anova(Logi14,Logi15, test="LRT")
+```
+
+```{r}
+summary(Logi1)
+summary(Logi2)
+summary(Logi3)
+summary(Logi4)
+summary(Logi5)
+summary(Logi6)
+summary(Logi7)
+summary(Logi8)
+summary(Logi9)
+summary(Logi10)
+summary(Logi11)
+summary(Logi12)
+summary(Logi13)
+summary(Logi14)
+summary(Logi15)
+
+```
+
+
+```{r}
+plot(Logi15)
+```
+
+```{r}
+plot(Logi10)
+```
+
+```{r}
+plot(Logi4)
+```
